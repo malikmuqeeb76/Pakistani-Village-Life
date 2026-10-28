@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Pakistani Village Life Simulator</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;font-family:Arial,sans-serif;background:#87ceeb}
+canvas{display:block}
+#hud{position:absolute;top:8px;left:8px;color:white;background:#0009;padding:10px;border-radius:12px;font-size:12px;max-width:75%;pointer-events:none}
+#actions{position:absolute;top:8px;right:8px;display:flex;flex-direction:column;gap:5px}
+button{border:1px solid #ffffff77;background:#173d2de8;color:white;border-radius:9px;padding:10px 12px;font-size:12px;font-weight:bold;touch-action:manipulation}
+#controls{position:absolute;bottom:16px;left:12px;display:grid;grid-template-columns:48px 48px 48px;grid-template-rows:48px 48px;gap:4px}
+#controls button{font-size:20px;padding:0}
+#interact{position:absolute;bottom:24px;right:16px;width:100px;height:58px;background:#9a4517ed}
+#message{position:absolute;bottom:95px;left:50%;transform:translateX(-50%);background:#000b;color:white;padding:9px 12px;border-radius:9px;font-size:13px;text-align:center;max-width:85%}
+#start{position:absolute;inset:0;background:#172d1bed;color:white;display:flex;align-items:center;justify-content:center;text-align:center;padding:25px;z-index:5}
+#start div{max-width:420px}
+#start button{font-size:16px;padding:14px 24px;background:#368c42}
+.small{opacity:.85;font-size:12px;line-height:1.6}
+</style>
+</head>
+<body>
+<div id="hud">🌾 PAKISTANI VILLAGE LIFE<br>Loading village...</div>
+<div id="actions">
+<button onclick="selectTool('seed')">🌱 FASAL</button>
+<button onclick="selectTool('water')">💧 PANI</button>
+<button onclick="selectTool('grass')">🌿 GHAAS</button>
+<button onclick="selectTool('milk')">🥛 DOODH</button>
+<button onclick="selectTool('tractor')">🚜 TRACTOR</button>
+<button onclick="selectTool('car')">🚙 FORTUNER</button>
+<button onclick="selectTool('home')">🏠 GHAR</button>
+</div>
+<div id="controls">
+<button style="grid-column:2" data-move="forward">▲</button>
+<button data-move="left">◀</button>
+<button data-move="back">▼</button>
+<button data-move="right">▶</button>
+</div>
+<button id="interact">ACTION</button>
+<div id="message">Gaon mein khush aamdeed!</div>
+<div id="start"><div>
+<h1>🌾 Pakistani Village Life Simulator</h1>
+<p>Apna gaon banao, kheti karo, janwaron ko chara do aur tractor chalao!</p>
+<p class="small">Mobile controls: arrows se chalo. ACTION se fasal ugao, pani lagao aur aas paas ki cheezon se interact karo.</p>
+<button id="play">GAME SHURU KARO</button>
+<p class="small">3D prototype • Internet connection required</p>
+</div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+(() => {
+"use strict";
+const hud=document.getElementById("hud");
+const message=document.getElementById("message");
+const startScreen=document.getElementById("start");
+const actionButton=document.getElementById("interact");
+
+if(!window.THREE){
+  message.textContent="3D library load nahi hui. Internet check karke page reload karo.";
+  return;
+}
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x9ed8ff);
+scene.fog=new THREE.Fog(0x9ed8ff,100,360);
+
+const camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,1000);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xdaf1ff,0x66533b,2));
+const sun=new THREE.DirectionalLight(0xfff0cf,2.2);
+sun.position.set(-50,90,35);
+sun.castShadow=true;
+sun.shadow.mapSize.set(1024,1024);
+scene.add(sun);
+
+const mat=(color,roughness=1)=>new THREE.MeshStandardMaterial({color,roughness});
+const grassMat=mat(0x538b3b);
+const soilMat=mat(0x77502d);
+const cropMat=mat(0x77c441);
+const waterMat=new THREE.MeshStandardMaterial({color:0x32b9f2,roughness:.25,transparent:true,opacity:.85});
+const woodMat=mat(0x89542b);
+const whiteMat=mat(0xe8dfc7);
+const blackMat=mat(0x171a1b);
+const redMat=mat(0xc52020);
+const greenMat=mat(0x28653a);
+const goldMat=mat(0xe6bd45);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(600,600),grassMat);
+ground.rotation.x=-Math.PI/2;
+ground.receiveShadow=true;
+scene.add(ground);
+
+const boxGeo=new THREE.BoxGeometry(1,1,1);
+const sphereGeo=new THREE.SphereGeometry(1,12,10);
+const cylGeo=new THREE.CylinderGeometry(.5,.5,1,12);
+
+function cube(parent,x,y,z,sx,sy,sz,material){
+ const o=new THREE.Mesh(boxGeo,material);
+ o.position.set(x,y,z);o.scale.set(sx,sy,sz);
+ o.castShadow=true;o.receiveShadow=true;parent.add(o);return o;
+}
+function sphere(parent,x,y,z,sx,sy,sz,material){
+ const o=new THREE.Mesh(sphereGeo,material);
+ o.position.set(x,y,z);o.scale.set(sx,sy,sz);
+ o.castShadow=true;parent.add(o);return o;
+}
+function cylinder(parent,x,y,z,r,h,material){
+ const o=new THREE.Mesh(cylGeo,material);
+ o.position.set(x,y,z);o.scale.set(r*2,h,r*2);
+ o.castShadow=true;parent.add(o);return o;
+}
+function group(x=0,y=0,z=0){
+ const g=new THREE.Group();g.position.set(x,y,z);scene.add(g);return g;
+}
+
+// Gaon ke raste
+cube(scene,0,.015,0,12,.03,600,mat(0xb9a17b));
+cube(scene,0,.02,0,600,.03,12,mat(0xb9a17b));
+cube(scene,0,.025,38,8,.035,110,mat(0xc7b18a));
+
+// Khet aur kheton ki mitti
+const fields=[];
+for(let f=0;f<6;f++){
+ const x=-48+(f%3)*24,z=25+Math.floor(f/3)*25;
+ const soil=cube(scene,x,.06,z,19,.1,18,soilMat);
+ const field={x,z,soil,crops:[],watered:false,growth:0};
+ for(let r=0;r<5;r++)for(let c=0;c<7;c++){
+  const crop=group(x-8+c*2,.12,z-7+r*3);
+  crop.visible=false;
+  const stem=cylinder(crop,0,.25,0,.08,.5,cropMat);
+  sphere(crop,0,.5,0,.16,.22,.16,greenMat);
+  field.crops.push(crop);
+ }
+ fields.push(field);
+}
+for(let i=0;i<6;i++){
+ const x=-60+i*22;
+ cube(scene,x,.1,15,.4,.2,22,woodMat);
+}
+
+// Tube well aur pani ki nali
+const pump=group(-27,0,4);
+cube(pump,0,.6,0,2,1.2,2,greenMat);
+cylinder(pump,0,1.45,0,.22,.5,blackMat);
+cube(pump,1.1,1.1,0,1.5,.18,.18,blackMat);
+cube(scene,-27,.13,12,.5,.25,18,waterMat);
+let waterOn=false;
+const tap=group(-27,0,10);
+cylinder(tap,0,.8,0,.1,1.6,blackMat);
+cube(tap,.35,1.4,0,.7,.12,.12,blackMat);
+
+// Ghar
+function makeHouse(x,z){
+ const h=group(x,0,z);
+ cube(h,0,1.5,0,12,3,9,mat(0xd3b58a));
+ cube(h,3,3.5,0,6,.35,9,mat(0x934c2c));
+ cube(h,0,3.5,0,6,.35,9,mat(0x934c2c));
+ cube(h,0,3.5,0,12,.35,3,mat(0x934c2c));
+ cube(h,0,3.5,0,12,.35,3,mat(0x934c2c));
+ cube(h,0,1,-4.56,1.6,2,.15,woodMat);
+ cube(h,-3,2,-4.65,1.3,.9,.12,mat(0x8ed5ec));
+ cube(h,3,2,-4.65,1.3,.9,.12,mat(0x8ed5ec));
+ cube(h,0,.55,5,14,.3,11,whiteMat);
+ return h;
+}
+makeHouse(10,-12);
+
+// Doosre gaon ke ghar
+for(let i=0;i<18;i++){
+ const x=(i%6)*19-48;
+ const z=-35-Math.floor(i/6)*19;
+ if(Math.abs(x)<17&&z>-22)continue;
+ const h=group(x,0,z);
+ const w=5+Math.random()*3,d=5+Math.random()*3;
+ cube(h,0,1.4,0,w,2.8,d,mat([0xc8ae88,0xd9c49d,0xbda27b][i%3]));
+ cube(h,0,3,0,w+1,.35,d+1,mat(0x954d31));
+ cube(h,0,1.1,-d/2-.03,1.2,2,.12,woodMat);
+}
+
+// Darakht
+function makeTree(x,z){
+ const t=group(x,0,z);
+ cylinder(t,0,1.8,0,.35,3.6,woodMat);
+ sphere(t,0,4,0,2.1,2.5,2.1,mat(0x34753a));
+ sphere(t,-1,4.6,0,1.2,1.6,1.3,mat(0x438644));
+}
+for(let i=0;i<100;i++){
+ let x=(Math.random()-.5)*260,z=(Math.random()-.5)*260;
+ if(Math.abs(x)<62&&Math.abs(z)<58)continue;
+ if(Math.abs(x)<9||Math.abs(z)<9)continue;
+ makeTree(x,z);
+}
+
+// Janwar: simple 3D models
+function makeAnimal(x,z,type,index){
+ const a=group(x,0,z);
+ const isGoat=type==="goat";
+ const bodyMat=mat(isGoat?0xd6c5a0:(type==="buffalo"?0x35302a:0xe4d9bd));
+ sphere(a,0,.95,0,isGoat?.7:1.05,isGoat?.5:.68,isGoat?.48:.58,bodyMat);
+ const head=sphere(a,.65,1.18,-.08,isGoat?.28:.38,isGoat?.35:.38,isGoat?.3:.3,bodyMat);
+ for(const dx of [-.65,.65]){
+  for(const dz of [-.3,.3]){
+   const leg=cube(a,dx,.43,dz,.16,.75,.16,bodyMat);
+   leg.userData.leg=true;
+  }
+ }
+ sphere(a,.94,1.35,-.12,.1,.08,.08,blackMat);
+ if(type==="cow"){
+  sphere(a,.95,.95,-.05,.22,.25,.25,mat(0xe5b5a4));
+  sphere(a,-.35,.56,.28,.28,.15,.23,whiteMat);
+ }
+ if(type==="buffalo"){
+  const horn1=cylinder(a,.8,1.55,-.35,.07,.45,whiteMat);
+  horn1.rotation.z=-.6;
+  const horn2=cylinder(a,.8,1.55,.2,.07,.45,whiteMat);
+  horn2.rotation.z=-.6;
+ }
+ a.userData={type,index,age:0,full:true};
+ animals.push(a);return a;
+}
+const animals=[];
+for(let i=0;i<7;i++)makeAnimal(-15+(i%4)*3,5+Math.floor(i/4)*3,"cow",i);
+for(let i=0;i<4;i++)makeAnimal(-14+(i%2)*3,16+Math.floor(i/2)*3,"buffalo",i);
+for(let i=0;i<6;i++)makeAnimal(18+(i%3)*2,7+Math.floor(i/3)*3,"goat",i);
+
+// Charay ki jagah
+for(let i=0;i<3;i++){
+ const x=-17+i*7;
+ cube(scene,x,.4,0,5,.8,1.4,woodMat);
+ cube(scene,x,.85,0,4.5,.15,1.1,cropMat);
+}
+
+// Tractor model
+function makeTractor(x,z,color){
+ const t=group(x,0,z);
+ const body=mat(color);
+ cube(t,0,1.1,0,2.2,.7,3,body);
+ cube(t,0,1.9,.15,1.45,1.1,1.3,body);
+ cube(t,2/10,2.5,.15,.9,.08,.9,mat(0x78c4e5));
+ cube(t,0,1.55,-1.45,1.3,.7,.6,body);
+ const wheels=[];
+ for(const side of [-1,1]){
+  for(const zpos of [-.95,1]){
+   const wheel=cylinder(t,side*1.15,.65,zpos,.62,.32,blackMat);
+   wheel.rotation.z=Math.PI/2;
+   wheels.push(wheel);
+   cylinder(t,side*1.34,.65,zpos,.28,.34,mat(0x777777)).rotation.z=Math.PI/2;
+  }
+ }
+ t.userData={type:"tractor",wheels,speed:0};
+ vehicles.push(t);return t;
+}
+const vehicles=[];
+makeTractor(-8,25,0xc91d22);
+makeTractor(4,25,0xb72a21);
+
+// Lakri ki trolley
+function makeTrolley(x,z){
+ const t=group(x,0,z);
+ cube(t,0,.8,0,3.5,.25,5,woodMat);
+ for(let i=0;i<4;i++)cube(t,0,1.3,-2+i*1.25,3.5,.8,.12,woodMat);
+ for(const side of [-1,1])for(const zz of [-1.5,1.5]){
+  const w=cylinder(t,side*1.85,.5,zz,.45,.22,blackMat);
+  w.rotation.z=Math.PI/2;
+ }
+ return t;
+}
+makeTrolley(-22,29);
+
+// Fortuner-style SUV prototype
+function makeCar(x,z){
+ const c=group(x,0,z);
+ cube(c,0,.95,0,2.7,.8,4.8,blackMat);
+ cube(c,0,1.65,.1,2.3,.8,2.5,mat(0x25292b));
+ cube(c,0,1.7,-1.2,2.2,.7,.15,mat(0x79b7cf));
+ cube(c,0,1.65,1.4,2.2,.6,.12,mat(0x79b7cf));
+ for(const side of [-1,1])for(const zz of [-1.5,1.5]){
+  const w=cylinder(c,side*1.35,.55,zz,.48,.25,blackMat);
+  w.rotation.z=Math.PI/2;
+ }
+ c.userData={type:"car",speed:0};vehicles.push(c);return c;
+}
+const car=makeCar(18,-4);
+
+// Player
+const player=group(2,0,3);
+const skinMat=mat(0xc88f68),shirtMat=mat(0x2b5c45),pantsMat=mat(0x343b49);
+cube(player,0,1.45,0,.65,.9,.4,shirtMat);
+sphere(player,0,2.15,0,.29,.32,.29,skinMat);
+cube(player,-.18,.65,0,.2,.65,.25,pantsMat);
+cube(player,.18,.65,0,.2,.65,.25,pantsMat);
+cube(player,0,2.43,0,.55,.12,.55,mat(0x533723));
+const playerStart=player.position.clone();
+
+let selected="seed",nearVehicle=null,driving=false,currentVehicle=null;
+let cropsPlanted=0,milkCollected=0,grassFed=0,harvested=0;
+let time=0;
+const keys={};
+const move={forward:false,back:false,left:false,right:false};
+let lastMessage=0;
+
+function say(s){
+ message.textContent=s;
+ lastMessage=Date.now();
+}
+function selectTool(t){
+ selected=t;
+ const names={seed:"Fasal lagane ke liye ACTION dabao",water:"Pani lagane ke liye ACTION dabao",grass:"Janwar ko chara do",milk:"Gaayein ya bhains ke paas ACTION dabao",tractor:"Tractor ya Fortuner ke paas ACTION dabao",car:"Fortuner ke paas ACTION dabao",home:"Ghar ke paas ACTION dabao"};
+ say(names[t]||t);
+}
+document.querySelectorAll("[data-move]").forEach(b=>{
+ const k=b.dataset.move;
+ const down=e=>{e.preventDefault();move[k]=true;};
+ const up=e=>{e.preventDefault();move[k]=false;};
+ b.addEventListener("pointerdown",down);
+ b.addEventListener("pointerup",up);
+ b.addEventListener("pointercancel",up);
+ b.addEventListener("pointerleave",up);
+});
+addEventListener("keydown",e=>{
+ keys[e.key.toLowerCase()]=true;
+ if(e.key===" "){e.preventDefault();interact();}
+});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+
+function distance(a,b){return a.position.distanceTo(b.position);}
+function nearestAnimal(){
+ let best=null,d=5;
+ for(const a of animals){const n=distance(player,a);if(n<d){d=n;best=a;}}
+ return best;
+}
+function nearestField(){
+ let best=null,d=13;
+ for(const f of fields){
+  const n=Math.hypot(player.position.x-f.x,player.position.z-f.z);
+  if(n<d){d=n;best=f;}
+ }
+ return best;
+}
+function findVehicle(){
+ let best=null,d=5;
+ for(const v of vehicles){const n=distance(player,v);if(n<d){d=n;best=v;}}
+ return best;
+}
+
+function interact(){
+ if(driving){
+  const offset=currentVehicle.position.clone();
+  offset.x+=2.8;offset.z+=1;
+  player.position.copy(offset);player.position.y=0;
+  currentVehicle.userData.speed=0;
+  driving=false;currentVehicle=null;
+  say("Aap vehicle se utar gaye.");
+  return;
+ }
+ const v=findVehicle();
+ if((selected==="tractor"||selected==="car")&&v){
+  driving=true;currentVehicle=v;
+  say("Vehicle control: arrows/WASD se chalao. ACTION se utro.");
+  return;
+ }
+ if(selected==="seed"){
+  const f=nearestField();
+  if(f){
+   const crop=f.crops.find(c=>!c.visible);
+   if(crop){
+    crop.visible=true;cropsPlanted++;
+    say("Fasal bo di! Ab pani lagao.");
+   }else say("Is khet mein aur jagah nahi.");
+  }else say("Khet ke paas jao.");
+  return;
+ }
+ if(selected==="water"){
+  const f=nearestField();
+  if(f){
+   f.watered=true;
+   f.growth=Math.min(1,f.growth+.35);
+   f.crops.forEach(c=>{
+    if(c.visible)c.scale.y=1+f.growth*1.5;
+   });
+   waterOn=true;
+   say("Khet ko pani lag gaya!");
+  }else if(Math.hypot(player.position.x+27,player.position.z-4)<10){
+   waterOn=!waterOn;say(waterOn?"Tube well aur pani ki nali chal pari.":"Tube well band ho gaya.");
+  }else say("Khet ya tube well ke paas jao.");
+  return;
+ }
+ if(selected==="grass"){
+  const a=nearestAnimal();
+  if(a){grassFed++;say("Janwar ko chara de diya! Kul chara: "+grassFed);}
+  else say("Janwar ke paas jao.");
+  return;
+ }
+ if(selected==="milk"){
+  const a=nearestAnimal();
+  if(a&&(a.userData.type==="cow"||a.userData.type==="buffalo")){
+   milkCollected++;
+   say("Doodh nikala! Total milk: "+milkCollected);
+  }else say("Gaayein ya bhains ke paas jao.");
+  return;
+ }
+ if(selected==="home"){
+  if(Math.hypot(player.position.x-10,player.position.z+12)<12)say("Ghar: bedroom, kitchen aur kapray change karne ke features aglay version mein add honge.");
+  else say("Apne ghar ke paas jao.");
+ }
+}
+actionButton.addEventListener("click",interact);
+document.getElementById("play").addEventListener("click",()=>{
+ startScreen.style.display="none";
+ say("Gaon mein khush aamdeed! Fasal tool select karo.");
+});
+
+function updateHud(){
+ hud.innerHTML=
+ "🌾 <b>PAKISTANI VILLAGE LIFE</b><br>"+
+ "Tool: "+selected.toUpperCase()+"<br>"+
+ "Fasal: "+cropsPlanted+" | Doodh: "+milkCollected+"<br>"+
+ "Chara: "+grassFed+" | Katai: "+harvested+"<br>"+
+ "Tube well: "+(waterOn?"ON":"OFF")+"<br>"+
+ (driving?"🚜 Vehicle mode":"🚶 Player mode");
+}
+
+function animate(){
+ requestAnimationFrame(animate);
+ const dt=Math.min(clock.getDelta(),.05);
+ time+=dt;
+ const forward=move.forward||keys.w||keys.arrowup;
+ const back=move.back||keys.s||keys.arrowdown;
+ const left=move.left||keys.a||keys.arrowleft;
+ const right=move.right||keys.d||keys.arrowright;
+ const zdir=(forward?1:0)-(back?1:0);
+ const xdir=(right?1:0)-(left?1:0);
+ if(driving&&currentVehicle){
+  const speed=(forward?1:0)-(back?1:0);
+  currentVehicle.userData.speed=THREE.MathUtils.damp(currentVehicle.userData.speed,speed*12,3,dt);
+  currentVehicle.position.x+=xdir*dt*8;
+  currentVehicle.position.z+=currentVehicle.userData.speed*dt;
+  currentVehicle.rotation.y=Math.atan2(xdir,1);
+  if(currentVehicle.userData.wheels)currentVehicle.userData.wheels.forEach(w=>w.rotation.x+=currentVehicle.userData.speed*dt);
+  player.position.copy(currentVehicle.position);player.position.y=0;
+ }else{
+  const len=Math.hypot(xdir,zdir)||1;
+  player.position.x+=xdir/len*dt*7;
+  player.position.z+=zdir/len*dt*7;
+  if(xdir||zdir)player.rotation.y=Math.atan2(xdir,zdir);
+ }
+ player.position.x=THREE.MathUtils.clamp(player.position.x,-280,280);
+ player.position.z=THREE.MathUtils.clamp(player.position.z,-280,280);
+
+ // Janwar halki movement aur charne ki animation
+ animals.forEach((a,i)=>{
+  a.position.y=Math.abs(Math.sin(time*2+i))*.025;
+  if(!a.userData.full){
+   a.userData.age+=dt;
+  }
+ });
+ const target=player.position.clone().add(new THREE.Vector3(0,5,9));
+ camera.position.lerp(target,.08);
+ camera.lookAt(player.position.x,1,player.position.z);
+
+ // Tube well se pani
+ waterMat.opacity=waterOn?.95:.45;
+ if(Date.now()-lastMessage>7000)message.textContent="Tool select karo aur ACTION dabao.";
+ updateHud();
+ renderer.render(scene,camera);
+}
+const clock=new THREE.Clock();
+camera.position.set(0,6,12);
+animate();
+addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+})();
+</script>
+</body>
+  </html>
